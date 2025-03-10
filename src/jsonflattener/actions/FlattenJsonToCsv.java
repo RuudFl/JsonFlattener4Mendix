@@ -46,18 +46,21 @@ public class FlattenJsonToCsv extends CustomJavaAction<java.lang.Boolean>
         flatMe.json2Sheet().headerSeparator("_").getJsonAsSheet();
         
         // Output CSV
-        String csvFilePath = "temp.csv";
-        flatMe.write2csv(csvFilePath);
+        // Create a temporary file
+        Path tempFilePath = Files.createTempFile("csv_output", ".csv");
+
+        // Write CSV to temp file
+        flatMe.write2csv(tempFilePath.toString());
         
         // Put contents in file
-        byte[] csvBytes = Files.readAllBytes(Paths.get(csvFilePath));
-        ByteArrayInputStream csvInputStream = new ByteArrayInputStream(csvBytes);
-        Core.storeFileDocumentContent(getContext(), this.csvOutput.getMendixObject(), csvInputStream);
-        
+        byte[] csvBytes = Files.readAllBytes(Paths.get(tempFilePath.toString()));
+        	try (ByteArrayInputStream csvInputStream = new ByteArrayInputStream(csvBytes)) {
+            Core.storeFileDocumentContent(getContext(), this.csvOutput.getMendixObject(), csvInputStream);
+        	}
+
         // Delete temp file
-        Path tempFilePath = Paths.get(csvFilePath);
-        Files.delete(tempFilePath);
-        
+        Files.deleteIfExists(tempFilePath);
+
         return true;
         
         } catch (Exception e) {
