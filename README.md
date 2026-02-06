@@ -1,12 +1,11 @@
 # JsonFlattener
-Flatten JSON to CSV. Based on https://github.com/opendevl/Json2Flat
+Flatten JSON to CSV.
 
 -----------------------------------
 INSTRUCTIONS:
 
-1) Create a filedocument (or a specialization of a filedocument) in a microflow
-2) Add the java action to your microflow and add a JSON string and the created filedocument as input parameters
+1) Add the java action to your microflow and add a JSON string as input parameter
 
 Dependencies:
 
-- Mendix Runtime 9.24.29 or higher
+- Mendix Runtime 9.24.37 or higher

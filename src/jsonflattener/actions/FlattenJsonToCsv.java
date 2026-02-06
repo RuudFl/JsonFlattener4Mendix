@@ -9,65 +9,91 @@
 
 package jsonflattener.actions;
 
-import com.mendix.core.Core;
 import com.mendix.systemwideinterfaces.core.IContext;
-import com.mendix.systemwideinterfaces.core.IMendixObject;
 import com.mendix.webui.CustomJavaAction;
-import java.io.ByteArrayInputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import com.github.opendevl.JFlat;
-import com.mendix.logging.ILogNode;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import java.io.StringWriter;
+import java.io.PrintWriter;
 
-public class FlattenJsonToCsv extends CustomJavaAction<java.lang.Boolean>
+public class FlattenJsonToCsv extends CustomJavaAction<java.lang.String>
 {
 	private java.lang.String jsonString;
-	private IMendixObject __csvOutput;
-	private system.proxies.FileDocument csvOutput;
 
-	public FlattenJsonToCsv(IContext context, java.lang.String jsonString, IMendixObject csvOutput)
+	public FlattenJsonToCsv(IContext context, java.lang.String jsonString)
 	{
 		super(context);
 		this.jsonString = jsonString;
-		this.__csvOutput = csvOutput;
 	}
 
 	@java.lang.Override
-	public java.lang.Boolean executeAction() throws Exception
+	public java.lang.String executeAction() throws Exception
 	{
-		this.csvOutput = this.__csvOutput == null ? null : system.proxies.FileDocument.initialize(getContext(), __csvOutput);
-
 		// BEGIN USER CODE
-
-	try {
-		// Flatten JSON
-        JFlat flatMe = new JFlat(jsonString);
-        flatMe.json2Sheet().headerSeparator("_").getJsonAsSheet();
+        // Parse the JSON string
+        JsonElement rootElement = JsonParser.parseString(jsonString);
         
-        // Output CSV
-        // Create a temporary file
-        Path tempFilePath = Files.createTempFile("csv_output", ".csv");
-
-        // Write CSV to temp file
-        flatMe.write2csv(tempFilePath.toString());
-        
-        // Put contents in file
-        byte[] csvBytes = Files.readAllBytes(Paths.get(tempFilePath.toString()));
-        	try (ByteArrayInputStream csvInputStream = new ByteArrayInputStream(csvBytes)) {
-            Core.storeFileDocumentContent(getContext(), this.csvOutput.getMendixObject(), csvInputStream);
-        	}
-
-        // Delete temp file
-        Files.deleteIfExists(tempFilePath);
-
-        return true;
-        
-        } catch (Exception e) {
-            LOGGER.warn("Failed to convert CSV file: " + e.getMessage(), e);
-            return false; // Operation failed
+        // Convert to array if it's a single object
+        JsonArray jsonArray;
+        if (rootElement.isJsonObject()) {
+            // Single object - wrap in array
+            jsonArray = new JsonArray();
+            jsonArray.add(rootElement.getAsJsonObject());
+        } else if (rootElement.isJsonArray()) {
+            // Already an array
+            jsonArray = rootElement.getAsJsonArray();
+        } else {
+            throw new IllegalArgumentException("JSON must be either an object or an array");
         }
-
+        
+        // Collect all unique column names across all records (maintaining order)
+        LinkedHashMap<String, Integer> allColumns = new LinkedHashMap<>();
+        List<Map<String, String>> flatRecords = new ArrayList<>();
+        
+        // Flatten each record
+        for (JsonElement element : jsonArray) {
+            if (!element.isJsonObject()) {
+                continue; // Skip non-object elements in array
+            }
+            
+            Map<String, String> flatRecord = new LinkedHashMap<>();
+            flattenJson("", element.getAsJsonObject(), flatRecord);
+            flatRecords.add(flatRecord);
+            
+            // Track all columns
+            for (String key : flatRecord.keySet()) {
+                allColumns.put(key, 1);
+            }
+        }
+        
+        // Build CSV
+        StringWriter stringWriter = new StringWriter();
+        PrintWriter writer = new PrintWriter(stringWriter);
+        
+        // Write header
+        List<String> columnList = new ArrayList<>(allColumns.keySet());
+        writer.println(String.join(",", columnList.stream()
+            .map(this::escapeCsvValue)
+            .toArray(String[]::new)));
+        
+        // Write data rows
+        for (Map<String, String> record : flatRecords) {
+            List<String> row = new ArrayList<>();
+            for (String column : columnList) {
+                String value = record.getOrDefault(column, "");
+                row.add(escapeCsvValue(value));
+            }
+            writer.println(String.join(",", row));
+        }
+        
+        writer.flush();
+        return stringWriter.toString();
 		// END USER CODE
 	}
 
@@ -82,6 +108,57 @@ public class FlattenJsonToCsv extends CustomJavaAction<java.lang.Boolean>
 	}
 
 	// BEGIN EXTRA CODE
-	private static final ILogNode LOGGER = Core.getLogger("JsonFlattener");
+    private void flattenJson(String prefix, JsonObject jsonObject, Map<String, String> result) {
+        // Use entrySet to maintain order
+        for (Map.Entry<String, JsonElement> entry : jsonObject.entrySet()) {
+            String key = prefix.isEmpty() ? entry.getKey() : prefix + "." + entry.getKey();
+            JsonElement value = entry.getValue();
+            
+            if (value.isJsonNull()) {
+                result.put(key, "");
+            } else if (value.isJsonPrimitive()) {
+                result.put(key, value.getAsString());
+            } else if (value.isJsonObject()) {
+                flattenJson(key, value.getAsJsonObject(), result);
+            } else if (value.isJsonArray()) {
+                flattenJsonArray(key, value.getAsJsonArray(), result);
+            }
+        }
+    }
+    
+    private void flattenJsonArray(String prefix, JsonArray jsonArray, Map<String, String> result) {
+        if (jsonArray.size() == 0) {
+            result.put(prefix, "");
+            return;
+        }
+        
+        for (int i = 0; i < jsonArray.size(); i++) {
+            JsonElement element = jsonArray.get(i);
+            String arrayKey = prefix + "." + i;
+            
+            if (element.isJsonNull()) {
+                result.put(arrayKey, "");
+            } else if (element.isJsonPrimitive()) {
+                result.put(arrayKey, element.getAsString());
+            } else if (element.isJsonObject()) {
+                flattenJson(arrayKey, element.getAsJsonObject(), result);
+            } else if (element.isJsonArray()) {
+                flattenJsonArray(arrayKey, element.getAsJsonArray(), result);
+            }
+        }
+    }
+    
+    private String escapeCsvValue(String value) {
+        if (value == null) {
+            return "";
+        }
+        
+        // Escape quotes and wrap in quotes if contains comma, quote, or newline
+        if (value.contains("\"") || value.contains(",") || value.contains("\n") || value.contains("\r")) {
+            return "\"" + value.replace("\"", "\"\"") + "\"";
+        }
+        
+        return value;
+    }
 	// END EXTRA CODE
 }
