@@ -25,11 +25,13 @@ import java.io.PrintWriter;
 public class FlattenJsonToCsv extends CustomJavaAction<java.lang.String>
 {
 	private java.lang.String jsonString;
+	private java.lang.String delimiter;
 
-	public FlattenJsonToCsv(IContext context, java.lang.String jsonString)
+	public FlattenJsonToCsv(IContext context, java.lang.String jsonString, java.lang.String delimiter)
 	{
 		super(context);
 		this.jsonString = jsonString;
+		this.delimiter = delimiter;
 	}
 
 	@java.lang.Override
@@ -149,16 +151,35 @@ public class FlattenJsonToCsv extends CustomJavaAction<java.lang.String>
     }
     
     private String escapeCsvValue(String value) {
-        if (value == null) {
-            return "";
-        }
-        
-        // Escape quotes and wrap in quotes if contains comma, quote, or newline
-        if (value.contains("\"") || value.contains(",") || value.contains("\n") || value.contains("\r")) {
-            return "\"" + value.replace("\"", "\"\"") + "\"";
-        }
-        
-        return value;
+    if (value == null) {
+        return "";
     }
+    
+    // Replace actual newlines with a space or literal \n text
+    // Choose the replacement that works best for your use case:
+    value = value.replace("\r\n", " ");  // Windows line endings
+    value = value.replace("\n", " ");     // Unix line endings  
+    value = value.replace("\r", " ");     // Old Mac line endings
+    
+    // Alternative: Use a visible placeholder like " | " or keep as literal \n
+    // value = value.replace("\n", "\\n").replace("\r", "\\r");
+    
+    boolean needsQuoting = false;
+    
+    // Check if value needs quoting (now we don't need to check for \n or \r)
+    if (value.contains("\"") || value.contains(",")) {
+        needsQuoting = true;
+    }
+    
+    // If needs quoting, escape internal quotes and wrap
+    if (needsQuoting) {
+        // First, escape any existing quotes by doubling them
+        value = value.replace("\"", "\"\"");
+        // Then wrap the entire value in quotes
+        return "\"" + value + "\"";
+    }
+    
+    return value;
+}
 	// END EXTRA CODE
 }
